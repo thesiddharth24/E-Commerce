@@ -2,7 +2,8 @@ const express = require("express")
 const server = express();
 const cors = require('cors')
 const PORT = 8080;
-const jwt = require('jsonwebtoken')
+const jwt = require('jsonwebtoken');
+const cookieParser = require('cookie-parser')
 //Authentication 
 const session = require('express-session');
 const passport = require('passport');
@@ -25,7 +26,7 @@ const auth = require('./routes/Auth');
 const cart = require('./routes/Cart');
 const order = require('./routes/Order');
 
-const {isAuth , sanitizeUser} = require('./services/common')
+const {isAuth , sanitizeUser , cookieExtractor} = require('./services/common')
 
 
 //JWT token 
@@ -35,7 +36,8 @@ const token = jwt.sign({},SECRET_KEY)
 
 //JWT options 
 const opts = {}
-opts.jwtFromRequest = ExtractJwt.fromAuthHeaderAsBearerToken();
+// opts.jwtFromRequest = ExtractJwt.fromAuthHeaderAsBearerToken();
+opts.jwtFromRequest = cookieExtractor;
 opts.secretOrKey = SECRET_KEY;
 
 
@@ -58,6 +60,7 @@ server.use(express.json());//
 server.use(cors({
     exposedHeaders:['X-Total-Count']
 }));
+server.use(express.static('build'));
 server.use(
     session({
       secret: 'keyboard cat',
@@ -65,6 +68,7 @@ server.use(
       saveUninitialized: false, // don't create session until something stored
     })
   );
+server.use(cookieParser());  
 server.use(passport.authenticate('session'));
 
 
@@ -104,7 +108,7 @@ passport.use('local',
                       
                     }else{
                         const token = jwt.sign(sanitizeUser(user),SECRET_KEY)
-                        done(null ,token); // this thing call serealize 
+                        done(null , { id: user.id, role: user.role, token }); // this thing call serealize 
                     }
                 })
 
@@ -120,7 +124,7 @@ passport.use('local',
 passport.use('jwt',new JwtStrategy(opts,async function(jwt_payload, done) {
     console.log({jwt_payload})
     try {
-        const user = await User.findOne({id: jwt_payload.sub});
+        const user = await User.findOne({id: jwt_payload.id});
             
             if (user) {
                 return done(null, sanitizeUser(user)); // this call serializer
@@ -151,6 +155,34 @@ passport.serializeUser(function (user, cb) {
       return cb(null, user);  
     });
   });
+
+
+// Payments
+
+// This is your test secret API key.
+const stripe = require('stripe')(process.env.STRIPE_SERVER_KEY);
+
+server.post('/create-payment-intent', async (req, res) => {
+  const { totalAmount, orderId } = req.body;
+
+  // Create a PaymentIntent with the order amount and currency
+  const paymentIntent = await stripe.paymentIntents.create({
+    amount: totalAmount * 100, // for decimal compensation
+    currency: 'inr',
+    automatic_payment_methods: {
+      enabled: true,
+    },
+    metadata: {
+      orderId,
+    },
+  });
+
+  res.send({
+    clientSecret: paymentIntent.client_secret,
+  });
+});
+
+main().catch((err) => console.log(err));  
 
 
 
