@@ -29,6 +29,49 @@ const order = require('./routes/Order');
 const {isAuth , sanitizeUser , cookieExtractor} = require('./services/common')
 
 
+//
+// Webhook
+
+const endpointSecret = process.env.ENDPOINT_SECRET;
+
+server.post(
+  '/webhook',
+  express.raw({ type: 'application/json' }),
+  async (request, response) => {
+    const sig = request.headers['stripe-signature'];
+
+    let event;
+
+    try {
+      event = stripe.webhooks.constructEvent(request.body, sig, endpointSecret);
+    } catch (err) {
+      response.status(400).send(`Webhook Error: ${err.message}`);
+      return;
+    }
+ 
+    // Handle the event
+ switch (event.type) {
+  case 'payment_intent.succeeded':
+    const paymentIntentSucceeded = event.data.object;
+
+    const order = await Order.findById(
+      paymentIntentSucceeded.metadata.orderId
+    );
+    order.paymentStatus = 'received';
+    await order.save();
+
+    break;
+  // ... handle other event types
+  default:
+    console.log(`Unhandled event type ${event.type}`);
+}
+
+// Return a 200 response to acknowledge receipt of the event
+response.send();
+}
+);
+
+
 //JWT token 
 const SECRET_KEY = 'SECRET_KEY';
 const token = jwt.sign({},SECRET_KEY)
